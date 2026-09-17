@@ -25,10 +25,10 @@ Antes, chão e ar chamavam `ApplyHorizontalMovement`, usando `GroundAcceleration
 Agora:
 
 - Com comando na direção da velocidade horizontal, aplica `AirAcceleration` até a velocidade desejada, sem reduzir uma velocidade que já esteja acima dela.
-- Com comando contrário à velocidade horizontal, aplica `AirDeceleration` em direção a zero. Se o comando continuar, depois de parar o personagem pode acelerar na direção contrária em outra atualização.
+- Com comando contrário à velocidade horizontal, aplica `AirDeceleration` junto com a resistência em direção a zero. Se parar antes do fim da atualização, usa o tempo restante para acelerar na direção do comando.
 - Aplica `AirResistance` em direção a zero em toda atualização de movimento aéreo, com ou sem comando. A resistência sozinha nunca inverte a direção.
 - Em repouso horizontal, uma direção pressionada inicia a aceleração.
-- As mudanças de velocidade são multiplicadas por `dt`.
+- Integra a velocidade usando `dt`, descontando o tempo gasto para parar ou desacelerar de uma velocidade acima do limite. Aceleração e resistência são combinadas antes de aplicar o limite de velocidade.
 - O movimento no chão, a altura do salto e a gravidade mantêm a implementação anterior.
 - O estado `Attacking` tem prioridade na resolução dos estados. Nesse caso, fora do chão ou subindo, chama o movimento aéreo com comando zero, preservando o bloqueio de controle durante ataques e aplicando resistência.
 
@@ -42,11 +42,11 @@ Agora:
 | `AirDeceleration` | 2200 | px/s² |
 | `AirResistance` | 150 | px/s² |
 
-O painel F2 permite ajustar cada valor de 0 a 5000. Alterações feitas durante a execução não são persistidas no código. A resistência é aplicada após a aceleração/frenagem e também atua enquanto uma direção é pressionada; portanto, reduz o ganho líquido de velocidade. Os valores iniciais ainda precisam de ajuste de sensação pelo desenvolvedor/design.
+O painel F2 permite ajustar cada valor de 0 a 5000. Alterações feitas durante a execução não são persistidas no código. A resistência também atua enquanto uma direção é pressionada: o ganho líquido é `AirAcceleration - AirResistance`, e a frenagem total é `AirDeceleration + AirResistance`. Resistência maior que a aceleração pode impedir a saída do repouso e reduzir a velocidade mesmo com comando. Os parâmetros negativos de aceleração, frenagem e resistência são tratados como zero. Os valores iniciais ainda precisam de ajuste de sensação pelo desenvolvedor/design.
 
 ## Como baixar a branch
 
-É necessário estar autenticado em uma conta com acesso ao repositório privado.
+O repositório é público e pode ser clonado sem convite.
 
 ```bash
 git clone --branch feature/air-movement --single-branch https://github.com/Correiaglm/kitawo-air-movement.git
@@ -67,25 +67,27 @@ cd kitawo-air-movement
 - O projeto completo recuperado compilou com zero erros, usando .NET SDK 10.0.401.
 - Para compilar a recuperação local, foi necessário adicionar a referência a `GumCommon` e habilitar anotações nullable no `.csproj`. Essas configurações locais não fazem parte da entrega.
 - Permaneceram dois avisos no código recuperado: uso de uma sobrecarga obsoleta de `DrawIndexedPrimitives` e evento `AttackHitbox2D.Hit` não utilizado.
-- A DLL compilada foi carregada numa cópia separada do jogo.
-- O usuário confirmou visualmente a diferença de resistência ao comparar 0 e 2000 no painel.
-- Um verificador local executou 30 verificações automatizadas contra os métodos reais da DLL compilada, todas aprovadas. Foram testados aceleração nas duas direções, limites de caminhada/corrida, ausência de comando, frenagem nas duas direções, parada sem ultrapassar zero, inversão após parar, resistência com e sem comando, valores zero, velocidade acima do limite, `dt` zero e preservação dos parâmetros do chão. A velocidade vertical permaneceu intacta em todas as chamadas.
-- Em 30, 60, 120 e 240 FPS, foram comparados um segundo de aceleração abaixo do limite e um segundo de resistência, com resultados equivalentes dentro da tolerância de 0,005 px/s.
-- O verificador chamou `ApplyAirMovement` e `ApplyHorizontalMovement` via reflexão, sem inicializar gráficos, mundo ou colisões. Portanto, não valida o ciclo completo de `Update`, transições de estado, ataque em queda ou a sensação de controle. O verificador ficou local, fora deste repositório, para preservar a entrega de apenas três arquivos de código e este README.
-- DLL testada (SHA-256): `272F1551CB50283E78DCAF84E520672B5484AECB49E2BA39BDB80B4A56187E2B`.
+- O usuário confirmou visualmente a diferença de resistência ao comparar 0 e 2000 no painel na primeira versão. A revisão atual acrescenta a correção de integração descrita abaixo.
+- **251 verificações isoladas aprovadas**, chamando os métodos reais da DLL por reflexão: aceleração nas duas direções, limites de caminhada/corrida, ausência de comando, frenagem, parada, inversão usando o tempo restante, resistência com e sem comando, parâmetros zero, velocidade acima do limite, `dt` zero e preservação dos parâmetros do chão. A velocidade vertical permaneceu intacta em todas as chamadas.
+- A matriz de velocidade compara passos de 30, 60, 120 e 240 FPS, seis velocidades iniciais, três comandos e três conjuntos de parâmetros. Inclui resistência superior à aceleração e parâmetros zerados; compara um segundo em vários passos com um passo de um segundo, com tolerância de 0,02 px/s. Testes abaixo do limite também passam com tolerância de 0,005 px/s.
+- **64 verificações de integração aprovadas**, com instâncias reais de `Player`, `CollisionWorld2D`, `EcbController2D`, `AttackComponent2D` e painel: estados Idle/Walking/Airborne/Attacking; corrida; salto e aterrissagem em quatro taxas de atualização; frenagem em queda; ataque iniciado no chão seguido de saída de plataforma; preservação do bloqueio de comando durante ataque; colisão com parede e teto; descida através de plataforma one-way; leitura/escrita e limites dos três controles de tuning.
+- Os cenários de integração executam `Player.Update` e colisões sem janela ou renderização. Não avaliam aparência, animações, áudio ou sensação subjetiva dos valores.
+- Os verificadores e relatórios ficam locais, fora deste repositório, para preservar a entrega de apenas três arquivos de código e este README. Não há CI configurada neste repositório parcial; o projeto original deve incorporar testes equivalentes.
+- DLL testada (SHA-256): `4169377EC2E16CF49237F93C81D6CC299D70EDC3691D5CF9DB1C0F36B788BBA1`.
+- A cópia do jogo com essa DLL iniciou, criou a janela e permaneceu respondendo após cinco segundos, sem saída de erro no teste de inicialização. Isso não substitui revisão visual prolongada.
 
-### Limitação observada: velocidade máxima e taxa de quadros
+### Correção da variação de velocidade com a taxa de quadros
 
-Como a resistência é aplicada depois de limitar a aceleração à velocidade desejada, a velocidade efetiva com comando contínuo fica um pouco abaixo do limite e varia com `dt`. Com os padrões (limite de caminhada de 240 px/s e resistência de 150 px/s²), após dois segundos de aceleração contínua:
+Na primeira versão, aplicar a resistência depois de limitar a aceleração provocava perda extra a cada quadro. A implementação atual combina as taxas antes de limitar a velocidade, e considera o tempo exato gasto para parar ou retornar ao limite. Com os padrões, após dois segundos de comando contínuo:
 
-| Taxa de atualização | Velocidade horizontal |
-| --- | ---: |
-| 30 FPS | 235 px/s |
-| 60 FPS | 237,5 px/s |
-| 120 FPS | 238,75 px/s |
-| 240 FPS | 239,375 px/s |
+| Taxa de atualização | Primeira versão | Versão atual |
+| --- | ---: | ---: |
+| 30 FPS | 235 px/s | 240 px/s |
+| 60 FPS | 237,5 px/s | 240 px/s |
+| 120 FPS | 238,75 px/s | 240 px/s |
+| 240 FPS | 239,375 px/s | 240 px/s |
 
-Nesse regime, a velocidade resulta em `MoveSpeed - AirResistance * dt`. A frenagem que chega a zero também só começa a inverter a direção em outra atualização. A implementação não deve ser descrita como totalmente independente da taxa de quadros. Recomenda-se avaliar esses limites na integração e decidir se a simulação usará passo fixo ou uma integração que trate aceleração, resistência e limites em conjunto.
+Essa correção foi validada para velocidade horizontal com comando e parâmetros constantes entre atualizações. Não significa independência completa de FPS para todo o jogo: o controlador de colisões continua integrando deslocamento com a velocidade do quadro, e ataques usam duração em quadros. Nenhuma dessas estruturas preexistentes foi modificada. A sensação final de controle e a integração no código-fonte original continuam a cargo da revisão do desenvolvedor responsável.
 
 ## Testes de aceitação sugeridos
 

@@ -300,43 +300,58 @@ public sealed class Player : IEcbBody2D, ICollisionActor
 	}
 	private void ApplyAirMovement(float move, float dt, ref Vector2 velocity)
 	{
-		if (move != 0f)
+		if (dt <= 0f)
 		{
-			CancelOneShot();
-
-			bool isBraking = velocity.X != 0f
-				&& MathF.Sign(move) != MathF.Sign(velocity.X);
-
-			if (isBraking)
-			{
-				velocity.X = MoveTowards(
-					velocity.X,
-					0f,
-					Tuning.AirDeceleration * dt);
-			}
-			else
-			{
-				float speed = Gait == PlayerGait.Run
-					? Tuning.RunSpeed
-					: Tuning.MoveSpeed;
-
-				float targetVelocity = move * speed;
-
-				if (MathF.Abs(velocity.X) < MathF.Abs(targetVelocity))
-				{
-					velocity.X = MoveTowards(
-						velocity.X,
-						targetVelocity,
-						Tuning.AirAcceleration * dt);
-				}
-			}
+			return;
 		}
 
-		velocity.X = MoveTowards(
-			velocity.X,
-			0f,
-			Tuning.AirResistance * dt);
+		float resistance = MathF.Max(0f, Tuning.AirResistance);
+		if (move == 0f)
+		{
+			velocity.X = MoveTowards(velocity.X, 0f, resistance * dt);
+			return;
+		}
+
+		CancelOneShot();
+		float inputDirection = MathF.Sign(move);
+		float alignedSpeed = velocity.X * inputDirection;
+		float remainingTime = dt;
+
+		// Spend only the time needed to stop, then use the rest to reverse.
+		if (alignedSpeed < 0f)
+		{
+			float braking = MathF.Max(0f, Tuning.AirDeceleration) + resistance;
+			if (braking == 0f || -alignedSpeed >= braking * remainingTime)
+			{
+				velocity.X = inputDirection * (alignedSpeed + braking * remainingTime);
+				return;
+			}
+			remainingTime -= -alignedSpeed / braking;
+			alignedSpeed = 0f;
+		}
+
+		float speedLimit = MathF.Max(0f, Gait == PlayerGait.Run ? Tuning.RunSpeed : Tuning.MoveSpeed);
+		float targetSpeed = MathF.Abs(move) * speedLimit;
+
+		// Above the desired speed, only resistance slows the character.
+		if (alignedSpeed > targetSpeed)
+		{
+			float excessSpeed = alignedSpeed - targetSpeed;
+			if (resistance == 0f || excessSpeed >= resistance * remainingTime)
+			{
+				velocity.X = inputDirection * (alignedSpeed - resistance * remainingTime);
+				return;
+			}
+			remainingTime -= excessSpeed / resistance;
+			alignedSpeed = targetSpeed;
+		}
+
+		// Combine both rates before enforcing the limit, avoiding a per-frame drag loss.
+		float netAcceleration = MathF.Max(0f, Tuning.AirAcceleration) - resistance;
+		alignedSpeed = Math.Clamp(alignedSpeed + netAcceleration * remainingTime, 0f, targetSpeed);
+		velocity.X = inputDirection * alignedSpeed;
 	}
+
 
 	private static float MoveTowards(float current, float target, float maximumChange)
 	{
