@@ -69,7 +69,23 @@ cd kitawo-air-movement
 - Permaneceram dois avisos no código recuperado: uso de uma sobrecarga obsoleta de `DrawIndexedPrimitives` e evento `AttackHitbox2D.Hit` não utilizado.
 - A DLL compilada foi carregada numa cópia separada do jogo.
 - O usuário confirmou visualmente a diferença de resistência ao comparar 0 e 2000 no painel.
-- Não há confirmação de teste completo de aceleração, frenagem, ataque em queda ou independência da taxa de quadros. Não foram criados testes automatizados nesta entrega.
+- Um verificador local executou 30 verificações automatizadas contra os métodos reais da DLL compilada, todas aprovadas. Foram testados aceleração nas duas direções, limites de caminhada/corrida, ausência de comando, frenagem nas duas direções, parada sem ultrapassar zero, inversão após parar, resistência com e sem comando, valores zero, velocidade acima do limite, `dt` zero e preservação dos parâmetros do chão. A velocidade vertical permaneceu intacta em todas as chamadas.
+- Em 30, 60, 120 e 240 FPS, foram comparados um segundo de aceleração abaixo do limite e um segundo de resistência, com resultados equivalentes dentro da tolerância de 0,005 px/s.
+- O verificador chamou `ApplyAirMovement` e `ApplyHorizontalMovement` via reflexão, sem inicializar gráficos, mundo ou colisões. Portanto, não valida o ciclo completo de `Update`, transições de estado, ataque em queda ou a sensação de controle. O verificador ficou local, fora deste repositório, para preservar a entrega de apenas três arquivos de código e este README.
+- DLL testada (SHA-256): `272F1551CB50283E78DCAF84E520672B5484AECB49E2BA39BDB80B4A56187E2B`.
+
+### Limitação observada: velocidade máxima e taxa de quadros
+
+Como a resistência é aplicada depois de limitar a aceleração à velocidade desejada, a velocidade efetiva com comando contínuo fica um pouco abaixo do limite e varia com `dt`. Com os padrões (limite de caminhada de 240 px/s e resistência de 150 px/s²), após dois segundos de aceleração contínua:
+
+| Taxa de atualização | Velocidade horizontal |
+| --- | ---: |
+| 30 FPS | 235 px/s |
+| 60 FPS | 237,5 px/s |
+| 120 FPS | 238,75 px/s |
+| 240 FPS | 239,375 px/s |
+
+Nesse regime, a velocidade resulta em `MoveSpeed - AirResistance * dt`. A frenagem que chega a zero também só começa a inverter a direção em outra atualização. A implementação não deve ser descrita como totalmente independente da taxa de quadros. Recomenda-se avaliar esses limites na integração e decidir se a simulação usará passo fixo ou uma integração que trate aceleração, resistência e limites em conjunto.
 
 ## Testes de aceitação sugeridos
 
